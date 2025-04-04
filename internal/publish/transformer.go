@@ -332,7 +332,7 @@ func (t *Transformer) transformRecord(record []string, header []string, headerIn
 // parseTimestamp converts a string timestamp to epoch seconds
 func (t *Transformer) parseTimestamp(timeStr string) (int64, error) {
 	// Handle empty timestamp
-	tm, err := time.Parse(time.RFC3339, timeStr)
+	tm, err := dateparse.ParseAny(timeStr)
 	if err != nil {
 		return 0, fmt.Errorf("error parsing timestamp: %w", err)
 	}
