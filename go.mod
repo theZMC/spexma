@@ -3,6 +3,7 @@ module github.com/thezmc/spexma
 go 1.24.0
 
 require (
+	github.com/araddon/dateparse v0.0.0-20210429162001-6b43995a97de
 	github.com/charmbracelet/lipgloss v1.0.0
 	github.com/spf13/cobra v1.9.1
 	golang.org/x/term v0.29.0

@@ -32,12 +32,21 @@ var (
 	sourceValue string
 
 	// Processing options
-	concurrency int           = 4
-	retryCount  int           = 3
-	retryWait   time.Duration = 2 * time.Second
-	dryRun      bool
-	debugMode   bool
-	timeOffset  time.Duration = 0
+	concurrency   int           = 4
+	retryCount    int           = 3
+	retryWait     time.Duration = 2 * time.Second
+	dryRun        bool
+	debugMode     bool
+	timeOffset    time.Duration = 0
+	excludeFields []string      = []string{
+		"date_hour",
+		"date_mday",
+		"date_minute",
+		"date_month",
+		"date_wday",
+		"date_year",
+		"date_zone",
+	}
 )
 
 // publishCmd represents the publish command
@@ -80,6 +89,7 @@ func init() {
 	publishCmd.Flags().BoolVar(&dryRun, "dry-run", false, "Don't actually send events, just show what would be sent")
 	publishCmd.Flags().BoolVar(&debugMode, "debug", false, "Enable debug logging")
 	publishCmd.Flags().DurationVar(&timeOffset, "time-offset", timeOffset, "Offset to apply to timestamps (e.g., -1h, +30m)")
+	publishCmd.Flags().StringArrayVar(&excludeFields, "exclude-fields", excludeFields, "Fields to exclude from the event; Splunk's default date expansion fields are excluded by default")
 
 	// Mark required flags
 	publishCmd.MarkFlagRequired("input-directory")
@@ -131,6 +141,7 @@ func runPublish(cmd *cobra.Command, args []string) {
 
 	// Create transformer configuration
 	tConfig := &publish.TransformerConfig{
+		ExcludeFields:    []string{},
 		TimeField:        timeField,
 		TimeFormat:       timeFormat,
 		Host:             hostValue,

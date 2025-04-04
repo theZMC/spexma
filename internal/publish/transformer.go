@@ -2,12 +2,14 @@ package publish
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/araddon/dateparse"
 	"github.com/thezmc/spexma/internal/publish/hec"
 )
 
@@ -129,10 +131,11 @@ func (t *Transformer) TransformCSV(reader io.Reader) ([]hec.Event, error) {
 }
 
 var (
-	rfc3339FullRGX = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$`)
-	iso8601FullRGX = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$`)
-	rfc3339RGX     = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})`)
-	iso8601RGX     = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})`)
+	// Regular expressions for matching timestamps as strings
+	rfc3339FullRGX = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$`)
+
+	// Regular expressions for matching timestamps in strings
+	rfc3339RGX = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?`)
 )
 
 func applyTimeOffsets(event *hec.Event, offset time.Duration) {
@@ -167,15 +170,7 @@ func applyTimeOffsets(event *hec.Event, offset time.Duration) {
 			switch {
 			case rfc3339FullRGX.MatchString(v):
 				// Parse the timestamp
-				timestamp, err := time.Parse(time.RFC3339, v)
-				if err == nil {
-					// Apply the time offset
-					timestamp = timestamp.Add(offset)
-					event.Event[key] = timestamp.Format(time.RFC3339)
-				}
-			case iso8601FullRGX.MatchString(v):
-				// Parse the timestamp
-				timestamp, err := time.Parse(time.RFC3339, v)
+				timestamp, err := dateparse.ParseAny(v)
 				if err == nil {
 					// Apply the time offset
 					timestamp = timestamp.Add(offset)
@@ -186,20 +181,7 @@ func applyTimeOffsets(event *hec.Event, offset time.Duration) {
 				for _, match := range matchIndex {
 					// Extract the timestamp
 					timestampStr := v[match[0]:match[1]]
-					timestamp, err := time.Parse(time.RFC3339, timestampStr)
-
-					if err == nil {
-						// Apply the time offset
-						timestamp = timestamp.Add(offset)
-						event.Event[key] = strings.Replace(v, timestampStr, timestamp.Format(time.RFC3339), 1)
-					}
-				}
-			case iso8601RGX.MatchString(v):
-				matchIndex := iso8601RGX.FindAllStringIndex(v, -1)
-				for _, match := range matchIndex {
-					// Extract the timestamp
-					timestampStr := v[match[0]:match[1]]
-					timestamp, err := time.Parse(time.RFC3339, timestampStr)
+					timestamp, err := dateparse.ParseAny(v)
 
 					if err == nil {
 						// Apply the time offset
@@ -246,6 +228,21 @@ func (t *Transformer) transformRecord(record []string, header []string, headerIn
 		event.Time = &unixTime
 	}
 
+	rawIsJSON := false
+
+	// Check if _raw is a valid JSON object
+	if rawIndex, ok := headerIndices["_raw"]; ok && rawIndex < len(record) {
+		rawValue := record[rawIndex]
+		if rawValue != "" {
+			rawJSON := make(map[string]any)
+			if err := json.Unmarshal([]byte(rawValue), &rawJSON); err == nil {
+				// If _raw is a valid JSON object, make it the event
+				event.Event = rawJSON
+				rawIsJSON = true
+			}
+		}
+	}
+
 	// Process fields
 	for i, value := range record {
 		if i >= len(header) {
@@ -260,8 +257,13 @@ func (t *Transformer) transformRecord(record []string, header []string, headerIn
 			// Skip time field since we already processed it
 			continue
 		case "_raw":
-			// Skip the raw field since it's not needed
-			continue
+			if rawIsJSON {
+				continue
+			}
+			// If _raw is not JSON, treat it as a string field
+			if value != "" {
+				event.Event["_raw"] = value
+			}
 		case "host":
 			if t.config.Host != "" {
 				event.Host = t.config.Host
@@ -284,6 +286,11 @@ func (t *Transformer) transformRecord(record []string, header []string, headerIn
 			}
 		case "punct":
 			// Skip punctuation field
+			continue
+		}
+
+		if rawIsJSON {
+			// If _raw is JSON, skip all other fields
 			continue
 		}
 
